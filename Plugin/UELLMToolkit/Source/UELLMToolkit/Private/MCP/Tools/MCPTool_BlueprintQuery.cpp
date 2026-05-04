@@ -612,26 +612,13 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteGetDefaults(const TSharedRef<FJso
 	bool bRootedAtComponent = false;
 	if (!ComponentName.IsEmpty())
 	{
-		// Try CDO components first (covers C++-declared components present on the CDO).
+		// Resolution order MUST match the write side (FMCPTool_BlueprintModify::ResolveComponentTemplate):
+		// SCS templates first (covers Blueprint-added components like AIPerception on a controller,
+		// whose CDO field is null because the SCS owns the editor-time template), then CDO components
+		// (covers C++-declared components present on the actor CDO). Mismatched ordering would make
+		// `get_defaults` and `set_cdo_default` address different objects when names collide.
 		UObject* ResolvedComponent = nullptr;
-		if (AActor* ActorCDO = Cast<AActor>(CDO))
-		{
-			TInlineComponentArray<UActorComponent*> AllComponents;
-			ActorCDO->GetComponents(AllComponents);
-			const FName SearchName(*ComponentName);
-			for (UActorComponent* Comp : AllComponents)
-			{
-				if (Comp && Comp->GetFName() == SearchName)
-				{
-					ResolvedComponent = Comp;
-					break;
-				}
-			}
-		}
-
-		// Fall back to SCS templates (covers Blueprint-added components like AIPerception on a controller,
-		// whose CDO field is null because the SCS owns the editor-time template).
-		if (!ResolvedComponent && Blueprint->SimpleConstructionScript)
+		if (Blueprint->SimpleConstructionScript)
 		{
 			const FName SearchName(*ComponentName);
 			for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
@@ -646,8 +633,26 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteGetDefaults(const TSharedRef<FJso
 
 		if (!ResolvedComponent)
 		{
+			if (AActor* ActorCDO = Cast<AActor>(CDO))
+			{
+				TInlineComponentArray<UActorComponent*> AllComponents;
+				ActorCDO->GetComponents(AllComponents);
+				const FName SearchName(*ComponentName);
+				for (UActorComponent* Comp : AllComponents)
+				{
+					if (Comp && Comp->GetFName() == SearchName)
+					{
+						ResolvedComponent = Comp;
+						break;
+					}
+				}
+			}
+		}
+
+		if (!ResolvedComponent)
+		{
 			return FMCPToolResult::Error(FString::Printf(
-				TEXT("Component '%s' not found on Blueprint '%s' (checked CDO components and SCS templates)"),
+				TEXT("Component '%s' not found on Blueprint '%s' (checked SCS templates and CDO components)"),
 				*ComponentName, *Blueprint->GetName()));
 		}
 
