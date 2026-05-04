@@ -1,51 +1,11 @@
 // Copyright Natali Caggiano. All Rights Reserved.
 
 #include "PropertySerializer.h"
+#include "PropertyPathParser.h"
 #include "UnrealClaudeUtils.h"
 #include "UObject/UnrealType.h"
 #include "UObject/TextProperty.h"
 #include "UObject/EnumProperty.h"
-
-namespace
-{
-	/**
-	 * Parse a path segment like "Foo" or "Foo[3]" into a name + optional index.
-	 * Returns false on malformed input ("Foo[", "Foo[abc]", "Foo[]", "Foo[3]bar").
-	 */
-	bool ParsePathSegment(const FString& Raw, FString& OutName, int32& OutIndex, FString& OutErr)
-	{
-		OutIndex = INDEX_NONE;
-		const int32 Open = Raw.Find(TEXT("["));
-		if (Open == INDEX_NONE)
-		{
-			OutName = Raw;
-			return true;
-		}
-
-		const int32 Close = Raw.Find(TEXT("]"));
-		if (Close == INDEX_NONE || Close != Raw.Len() - 1 || Close <= Open + 1)
-		{
-			OutErr = FString::Printf(TEXT("Malformed path segment '%s' (expected Name[N])"), *Raw);
-			return false;
-		}
-
-		const FString IndexStr = Raw.Mid(Open + 1, Close - Open - 1);
-		if (!IndexStr.IsNumeric())
-		{
-			OutErr = FString::Printf(TEXT("Non-numeric index in '%s'"), *Raw);
-			return false;
-		}
-
-		OutName = Raw.Left(Open);
-		OutIndex = FCString::Atoi(*IndexStr);
-		if (OutIndex < 0)
-		{
-			OutErr = FString::Printf(TEXT("Negative index in '%s'"), *Raw);
-			return false;
-		}
-		return true;
-	}
-}
 
 TSharedPtr<FJsonValue> FPropertySerializer::PropertyToJsonValue(FProperty* Property, const void* ValuePtr)
 {
@@ -313,7 +273,7 @@ FPropertySerializer::FPropertyPathResult FPropertySerializer::GetPropertyByPath(
 		FString SegName;
 		int32 SegIndex = INDEX_NONE;
 		FString ParseErr;
-		if (!ParsePathSegment(PathParts[i], SegName, SegIndex, ParseErr))
+		if (!FPropertyPathParser::ParseSegment(PathParts[i], SegName, SegIndex, ParseErr))
 		{
 			Result.Error = ParseErr;
 			return Result;
@@ -402,7 +362,7 @@ FPropertySerializer::FPropertyPathResult FPropertySerializer::GetPropertyByPath(
 	FString LeafName;
 	int32 LeafIndex = INDEX_NONE;
 	FString LeafErr;
-	if (!ParsePathSegment(PathParts.Last(), LeafName, LeafIndex, LeafErr))
+	if (!FPropertyPathParser::ParseSegment(PathParts.Last(), LeafName, LeafIndex, LeafErr))
 	{
 		Result.Error = LeafErr;
 		return Result;
