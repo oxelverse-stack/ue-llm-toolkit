@@ -108,8 +108,12 @@ bool FMCPParamValidator::ValidatePropertyPath(const FString& PropertyPath, FStri
 	// and balanced [N] array indices. Reject other characters as a defense-in-depth
 	// measure (the actual property lookup is reflection-based, but we keep the input
 	// surface narrow).
+	// Cap bracket-body length to defang integer-overflow attacks. 9 digits permit any value
+	// up to 999_999_999 — far above realistic UE array sizes — and stay well clear of
+	// MAX_int32 (2_147_483_647) so the eventual Atoi/Atoi64 in the parser can't wrap.
+	const int32 MaxBracketDigits = 9;
 	int32 BracketDepth = 0;
-	bool bSawIndexDigit = false;
+	int32 IndexDigitsSeen = 0;
 	for (TCHAR c : PropertyPath)
 	{
 		if (c == TEXT('['))
@@ -120,7 +124,7 @@ bool FMCPParamValidator::ValidatePropertyPath(const FString& PropertyPath, FStri
 				return false;
 			}
 			BracketDepth = 1;
-			bSawIndexDigit = false;
+			IndexDigitsSeen = 0;
 			continue;
 		}
 		if (c == TEXT(']'))
@@ -130,7 +134,7 @@ bool FMCPParamValidator::ValidatePropertyPath(const FString& PropertyPath, FStri
 				OutError = TEXT("Property path has unbalanced ']'");
 				return false;
 			}
-			if (!bSawIndexDigit)
+			if (IndexDigitsSeen == 0)
 			{
 				OutError = TEXT("Property path has empty bracket pair '[]'");
 				return false;
@@ -145,7 +149,12 @@ bool FMCPParamValidator::ValidatePropertyPath(const FString& PropertyPath, FStri
 				OutError = FString::Printf(TEXT("Property path bracket body must be numeric, got '%c'"), c);
 				return false;
 			}
-			bSawIndexDigit = true;
+			IndexDigitsSeen++;
+			if (IndexDigitsSeen > MaxBracketDigits)
+			{
+				OutError = FString::Printf(TEXT("Property path array index exceeds %d digits"), MaxBracketDigits);
+				return false;
+			}
 			continue;
 		}
 		if (!FChar::IsAlnum(c) && c != TEXT('_') && c != TEXT('.'))

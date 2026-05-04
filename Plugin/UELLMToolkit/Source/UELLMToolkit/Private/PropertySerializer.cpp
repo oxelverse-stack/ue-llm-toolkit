@@ -78,7 +78,13 @@ TSharedPtr<FJsonValue> FPropertySerializer::PropertyToJsonValue(FProperty* Prope
 		FScriptArrayHelper ArrayHelper(ArrayProp, ValuePtr);
 		for (int32 i = 0; i < ArrayHelper.Num(); ++i)
 		{
+			if (Ctx.IsBudgetExhausted())
+			{
+				JsonArray.Add(MakeShared<FJsonValueString>(TEXT("_truncated")));
+				break;
+			}
 			JsonArray.Add(PropertyToJsonValue(ArrayProp->Inner, ArrayHelper.GetRawPtr(i), Ctx));
+			Ctx.PropertyCount++;
 		}
 		return MakeShared<FJsonValueArray>(JsonArray);
 	}
@@ -93,11 +99,17 @@ TSharedPtr<FJsonValue> FPropertySerializer::PropertyToJsonValue(FProperty* Prope
 			{
 				continue;
 			}
+			if (Ctx.IsBudgetExhausted())
+			{
+				MapObj->SetBoolField(TEXT("_truncated"), true);
+				break;
+			}
 
 			FString KeyStr;
 			MapProp->KeyProp->ExportTextItem_Direct(KeyStr, MapHelper.GetKeyPtr(i), nullptr, nullptr, PPF_None);
 			TSharedPtr<FJsonValue> ValJson = PropertyToJsonValue(MapProp->ValueProp, MapHelper.GetValuePtr(i), Ctx);
 			MapObj->SetField(KeyStr, ValJson);
+			Ctx.PropertyCount++;
 		}
 		return MakeShared<FJsonValueObject>(MapObj);
 	}
@@ -138,6 +150,9 @@ TSharedPtr<FJsonValue> FPropertySerializer::PropertyToJsonValue(FProperty* Prope
 			return MakeShared<FJsonValueString>(Obj->GetPathName());
 		}
 
+		// Visited acts as a true cycle-detector: it tracks objects on the *current* recursion
+		// stack and is popped on return. This avoids false-positive "(cycle:)" labels for the
+		// common UE pattern of two properties pointing at the same shared subobject.
 		if (Ctx.Visited.Contains(Obj))
 		{
 			return MakeShared<FJsonValueString>(FString::Printf(TEXT("(cycle: %s)"), *Obj->GetPathName()));
@@ -168,6 +183,7 @@ TSharedPtr<FJsonValue> FPropertySerializer::PropertyToJsonValue(FProperty* Prope
 		}
 
 		Ctx.CurrentDepth--;
+		Ctx.Visited.Remove(Obj);
 		return MakeShared<FJsonValueObject>(NestedObj);
 	}
 
@@ -256,12 +272,13 @@ FPropertySerializer::FPropertyPathResult FPropertySerializer::GetPropertyByPath(
 		return Result;
 	}
 
+	// Route through the shared parser so read and write paths agree on shape validation
+	// (no leading/trailing/consecutive dots, no empty segments).
 	TArray<FString> PathParts;
-	PropertyPath.ParseIntoArray(PathParts, TEXT("."), true);
-
-	if (PathParts.Num() == 0)
+	FString SplitErr;
+	if (!FPropertyPathParser::SplitPath(PropertyPath, PathParts, SplitErr))
 	{
-		Result.Error = TEXT("Empty property path");
+		Result.Error = SplitErr;
 		return Result;
 	}
 

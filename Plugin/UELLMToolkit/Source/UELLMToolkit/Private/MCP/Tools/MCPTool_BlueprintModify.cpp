@@ -1122,6 +1122,10 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteSetComponentDefault(const TShare
 	{
 		return Error.GetValue();
 	}
+	if (!ValidatePropertyPathParam(PropertyPath, Error))
+	{
+		return Error.GetValue();
+	}
 
 	if (!Params->HasField(TEXT("value")))
 	{
@@ -1388,6 +1392,10 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteSetCDODefault(const TSharedRef<F
 	TOptional<FMCPToolResult> Error;
 	FString PropertyPath;
 	if (!ExtractRequiredString(Params, TEXT("property"), PropertyPath, Error))
+	{
+		return Error.GetValue();
+	}
+	if (!ValidatePropertyPathParam(PropertyPath, Error))
 	{
 		return Error.GetValue();
 	}

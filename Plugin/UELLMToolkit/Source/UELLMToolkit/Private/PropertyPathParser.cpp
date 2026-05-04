@@ -41,13 +41,22 @@ bool FPropertyPathParser::ParseSegment(const FString& Raw, FString& OutName, int
 		return false;
 	}
 
-	OutName = Raw.Left(Open);
-	OutIndex = FCString::Atoi(*IndexStr);
-	if (OutIndex < 0)
+	// Use Atoi64 + explicit int32-range check so overlong digit strings can't wrap silently.
+	// (Validator caps bracket length to 9 digits; this is belt-and-braces for direct callers.)
+	const int64 Parsed = FCString::Atoi64(*IndexStr);
+	if (Parsed < 0)
 	{
 		OutErr = FString::Printf(TEXT("Negative index in '%s'"), *Raw);
 		return false;
 	}
+	if (Parsed > static_cast<int64>(TNumericLimits<int32>::Max()))
+	{
+		OutErr = FString::Printf(TEXT("Index in '%s' exceeds int32 range"), *Raw);
+		return false;
+	}
+
+	OutName = Raw.Left(Open);
+	OutIndex = static_cast<int32>(Parsed);
 	return true;
 }
 
